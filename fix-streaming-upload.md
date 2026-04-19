@@ -47,3 +47,41 @@ The investigation includes:
 - Minimal reproducer test scripts bracketing the exact failure point
 - Side-by-side comparison of upstream vs fix architecture
 - Confirmed working on scripts up to 57 KB (with color API on neotrellis fork)
+
+---
+
+## What's new compared to PR #8 / issue #9
+
+PR [#8](https://codeberg.org/tehn/iii/pulls/8) and issue [#9](https://codeberg.org/tehn/iii/issues/9) proposed the same streaming approach (from the `fix/25kb-streaming` branch). That PR was described as "failing as-is" — this branch explains why, and fixes it.
+
+### The missing piece: v1.1.2 memory improvements
+
+The streaming fix requires enough heap headroom for the Lua VM to operate while `lua_load()` compiles from flash. PR #8 predated v1.1.2. The three memory improvements that landed in v1.1.2 are what make the streaming approach viable:
+
+1. **`LUA_32BITS`** — Lua integers and floats shrink from 8 bytes to 4 bytes, recovering ~8–9 KB of heap
+2. **Library removals** — `io`, `os`, `utf8`, `package`, `coroutine` stripped from `luaopen_libs`; no longer loaded into the VM at boot
+3. **`lua_gc(L, LUA_GCCOLLECT)` after each lib** — each standard library load is followed by a forced GC cycle, keeping the heap clean during init
+
+This branch is rebased on v1.1.2 (`ed920ef`) and preserves all three improvements. Without them there is not enough free heap for `lua_load()` to compile even a mid-sized script — which is exactly why tehn's own `chunks` branch also crashed when tested against the pre-v1.1.2 codebase.
+
+### Precise root cause now documented
+
+PR #8 described the symptom (buffer full / crash). This branch adds the full two-bug chain:
+
+- **Bug 1**: `reset_script_rx()` clears `in_rx_script` without freeing `script_buf` — 32 KB permanently leaked
+- **Bug 2**: remaining incoming lines are routed to `vm_run_buffer()`; first Lua allocation fails; `my_alloc` calls `watchdog_reboot()` then returns `NULL`; Lua dereferences `NULL` → hard fault before watchdog fires → USB unreachable
+
+The `// TODO: actually do something else?` comment in `my_alloc` already flagged this path as unsafe.
+
+### Exact failure threshold measured
+
+Using minimal reproducer scripts that bracket the exact overflow point (accounting for diii's CRLF transmission — effective buffer usage is `file_size + num_lines`):
+
+| Script | Size | Lines | Effective | Result |
+|--------|------|-------|-----------|--------|
+| `threshold_test_under.lua` | 32,240 B | 505 | 32,745 B | ✅ passes |
+| `threshold_test_over.lua`  | 32,304 B | 506 | 32,810 B | ❌ hard fault |
+
+### Cleaner implementation scope
+
+PR #8 also modified `lib_lua.c`. This branch touches only the three files that need changing: `repl.c`, `vm.c`, `vm.h`. No embedded resource changes.
