@@ -10,11 +10,8 @@
 //--- constants and state
 
 //--- input buffers
-#define SCRIPT_BUFFER_SIZE 32767
-// #define SCRIPT_BUFFER_SIZE 16383
-//  extra byte for null terminator
-//static char script_buf[SCRIPT_BUFFER_SIZE + 1];
-static char *script_buf;
+static lfs_file_t upload_file;
+static char temp_name_buffer[256];
 static uint32_t script_rx_pos = 0;
 static char filename[256] = "init.lua";
 
@@ -82,75 +79,75 @@ bool handle_command(char cmd) {
     break;
 
   case REPL_CMD_START_DATA:
-    script_buf = malloc(SCRIPT_BUFFER_SIZE + 1);
-    if(script_buf == NULL) {
-      serial("-- memory allocation fail!\r\n");
-    } else {
+    if (fs_file_open(&upload_file, ".uploading.tmp", LFS_O_CREAT | LFS_O_WRONLY) == 0) {
       in_rx_script = true;
       script_rx_pos = 0;
       serial("-- receiving data\r\n");
+    } else {
+      serial("-- upload file open fail!\r\n");
     }
     break;
 
   case REPL_CMD_END_FILENAME:
     if(in_rx_script) {
-      script_buf[script_rx_pos] = '\0';
+      if (script_rx_pos < sizeof(temp_name_buffer)) {
+        temp_name_buffer[script_rx_pos] = '\0';
+      } else {
+        temp_name_buffer[sizeof(temp_name_buffer)-1] = '\0';
+      }
+
+      fs_file_close(&upload_file);
+      fs_remove(".uploading.tmp");
+
       if (script_rx_pos < 1) {
         serial("-- no data received\r\n");
       } else {
-        // need to strip the \r\n
-        script_buf[script_rx_pos] = '\0';
-        uint8_t i = (uint8_t)script_rx_pos;
+        // strip \r\n
+        uint8_t i = (script_rx_pos < sizeof(temp_name_buffer)) ? (uint8_t)script_rx_pos : sizeof(temp_name_buffer)-1;
         while (i > 0 &&
-               (script_buf[i - 1] == '\r' || script_buf[i - 1] == '\n')) {
+               (temp_name_buffer[i - 1] == '\r' || temp_name_buffer[i - 1] == '\n')) {
           i--;
-          script_buf[i] = '\0';
+          temp_name_buffer[i] = '\0';
         }
-        serial("-- set filename: %s\r\n", script_buf);
-        // test if filename is ok
+        serial("-- set filename: %s\r\n", temp_name_buffer);
+        // test if filename is valid
         const int flags = LFS_O_CREAT | LFS_O_WRONLY;
         lfs_file_t file;
-        if (fs_file_open(&file, script_buf, flags) == 0) {
+        if (fs_file_open(&file, temp_name_buffer, flags) == 0) {
           fs_file_close(&file);
-          if(fs_file_size(&file)==0) fs_remove(script_buf);
-          strcpy(filename, script_buf);
+          if (fs_file_size(&file) == 0) fs_remove(temp_name_buffer);
+          strcpy(filename, temp_name_buffer);
         } else {
           serial("-- bad filename!\r\n");
         }
       }
       reset_script_rx();
-      free(script_buf);
     } else {
-      serial("-- file name end without start");
+      serial("-- file name end without start\r\n");
     }
     break;
 
   case REPL_CMD_END_WRITE:
     if(in_rx_script) {
       serial("-- write file\r\n");
-      script_buf[script_rx_pos] = '\0';
+      fs_file_close(&upload_file);
       if (script_rx_pos < 1) {
         serial("-- no data received\r\n");
+        fs_remove(".uploading.tmp");
       } else {
-        // test compilation of received script, print any errors
-        if (vm_test_script(script_buf)) {
-          lfs_file_t file;
-          if (fs_file_open(&file, filename, LFS_O_CREAT | LFS_O_WRONLY) == 0) {
-            // +1 to write \0
-            fs_file_write(&file, script_buf, strlen(script_buf) + 1);
-            fs_file_close(&file);
-            serial("-- file written: %s\r\n", filename);
-          } else {
-            serial("-- file write fail!\r\n");
-          }
+        // test compilation from file
+        if (vm_test_file(".uploading.tmp")) {
+          fs_remove(filename);
+          fs_rename(".uploading.tmp", filename);
+          serial("-- file written: %s\r\n", filename);
         } else {
           serial("-- compilation fail!\r\n");
+          fs_remove(".uploading.tmp");
         }
       }
       reset_script_rx();
-      free(script_buf);
     } else {
-      serial("-- file write end without start");
+      serial("-- file write end without start\r\n");
     }
     break;
 
@@ -200,15 +197,14 @@ void repl_handle_byte(uint8_t b) {
     } else {
       // not a command
       if (in_rx_script) {
-        // add line to script buffer
-        if (script_rx_pos + line_buf_pos < (SCRIPT_BUFFER_SIZE - 1)) {
-          memcpy(script_buf + script_rx_pos, line_buf, line_buf_pos);
-          script_buf[script_rx_pos + line_buf_pos] = '\n';
-          script_rx_pos += line_buf_pos + 1;
-        } else {
-          serial("-- script buffer full!\r\n");
-          reset_script_rx();
+        // buffer filename data or stream script lines to LittleFS
+        if (script_rx_pos + line_buf_pos < (sizeof(temp_name_buffer) - 1)) {
+          memcpy(temp_name_buffer + script_rx_pos, line_buf, line_buf_pos);
+          temp_name_buffer[script_rx_pos + line_buf_pos] = '\n';
         }
+        fs_file_write(&upload_file, line_buf, line_buf_pos);
+        fs_file_write(&upload_file, "\n", 1);
+        script_rx_pos += line_buf_pos + 1;
       } else {
         // compile and execute the line as lua source, printing any errors
         line_buf[line_buf_pos] = '\0';

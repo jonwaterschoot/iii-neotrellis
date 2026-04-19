@@ -213,35 +213,16 @@ static int l_fs_read_file(lua_State *l) {
   return 1;
 }
 
-// read an entire file from the filesystem,
+// stream a file from the filesystem,
 // interpret it as lua code, returning the result
 static int l_fs_run_file(lua_State *l) {
   const char *path = lua_tostring(l, 1);
-  const int flags = LFS_O_RDONLY;
-  lfs_file_t file;
-  if (fs_file_open(&file, path, flags) == 0) {
-    const unsigned int sz = (unsigned int)fs_file_size(&file);
-    char *buf = malloc(sz + 1);
-    if (buf == NULL)
-      serial("malloc fail!\r\n");
-    buf[sz] = 0;
-    fs_file_read(&file, buf, sz);
-    fs_file_close(&file);
-    //int top = lua_gettop(L);
-    int res = luaL_dostring(L, buf);
-    free(buf);
-    if (res != LUA_OK) {
-      // TODO: handle errors...
-      const char *err = lua_tostring(L, -1);
-      serial("%s\n", (const uint8_t *)err);
-    }
-    //return lua_gettop(L) - top;
+  if (vm_run_file_stream(path)) {
     return 1;
   } else {
-    // file not found
     lua_pushnil(l);
+    return 1;
   }
-  return 0;
 }
 
 static int l_fs_write_file(lua_State *l) {
@@ -397,43 +378,19 @@ void vm_init(bool run_script) {
 
   if (run_script) {
     // run lib.lua
-    if (fs_file_open(&f, "lib.lua", LFS_O_RDONLY) == 0) {
-      const unsigned int sz = (unsigned int)fs_file_size(&f);
-      char *buf = malloc(sz + 1);
-      buf[sz] = '\0';
-      fs_file_read(&f, buf, sz);
-      fs_file_close(&f);
-      serial("-- init: running lib\r\n");
-      int res = luaL_dostring(L, buf);
-      free(buf);
-      if (res != LUA_OK) {
-        const char *err = lua_tostring(L, -1);
-        serial("-- init: lib errors!\r\n%s\r\n", (const uint8_t *)err);
-      }
-    } else {
+    serial("-- init: running lib\r\n");
+    if (!vm_run_file_stream("lib.lua")) {
       serial("-- init: lib fail!\r\n");
     }
 
     lua_gc(L, LUA_GCCOLLECT);
 
     // run init.lua if present
-    const char *path = "init.lua";
-    const int flags = LFS_O_RDONLY;
-    lfs_file_t file;
-    if (fs_file_open(&file, path, flags) == 0) {
-      const unsigned int sz = (unsigned int)fs_file_size(&file);
-      char *buf = malloc(sz + 1);
-      buf[sz] = '\0';
-      fs_file_read(&file, buf, sz);
-      fs_file_close(&file);
+    struct lfs_info info;
+    if (fs_stat("init.lua", &info) == LFS_ERR_OK) {
       serial("-- init: running script\r\n");
-      int res = luaL_dostring(L, buf);
-      free(buf);
-      if (res != LUA_OK) {
+      if (!vm_run_file_stream("init.lua")) {
         serial("-- init: error running script\r\n");
-        // TODO: handle errors better/differently?
-        const char *err = lua_tostring(L, -1);
-        serial("%s\r\n", (const uint8_t *)err);
       }
     } else {
       serial("-- init: no script\r\n");
@@ -482,6 +439,58 @@ bool vm_run_buffer(const char *buf) {
   } else {
     return true;
   }
+}
+
+typedef struct {
+  lfs_file_t file;
+  char buf[256];
+} fs_reader_data_t;
+
+static const char *fs_lua_reader(lua_State *l, void *ud, size_t *size) {
+  (void)l;
+  fs_reader_data_t *data = (fs_reader_data_t *)ud;
+  lfs_ssize_t res = fs_file_read(&data->file, data->buf, sizeof(data->buf));
+  if (res > 0) {
+    *size = res;
+    return data->buf;
+  }
+  *size = 0;
+  return NULL;
+}
+
+static bool call_lua_file_stream(const char *filename, bool run) {
+  fs_reader_data_t reader;
+  if (fs_file_open(&reader.file, filename, LFS_O_RDONLY) == 0) {
+    char chunkname[256] = "@";
+    strncat(chunkname, filename, 254);
+    int res = lua_load(L, fs_lua_reader, &reader, chunkname, "t");
+    fs_file_close(&reader.file);
+
+    if (res != LUA_OK) {
+      serial("-- lua error:\r\n");
+      const char *err = lua_tostring(L, -1);
+      serial("%s\r\n", (const uint8_t *)err);
+      lua_pop(L, 1);
+      return false;
+    }
+
+    if (!run) {
+      serial("-- compiled ok\r\n");
+      lua_pop(L, 1);
+      return true;
+    }
+
+    return docall(L, 0, LUA_MULTRET) == LUA_OK;
+  }
+  return false;
+}
+
+bool vm_test_file(const char *filename) {
+  return call_lua_file_stream(filename, false);
+}
+
+bool vm_run_file_stream(const char *filename) {
+  return call_lua_file_stream(filename, true);
 }
 
 //////////////////////////////////////////////////////////////////
