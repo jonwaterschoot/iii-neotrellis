@@ -40,7 +40,7 @@ Replace the fixed-size heap buffer with a streaming approach:
 
 Complete bug analysis, reproduction steps, test scripts, and upstream issue draft:
 
-[leaveseqr-upload-failure-investigation.md](https://github.com/jonwaterschoot/neotrellis-monome/blob/dev/colors-v2/neotrellis_monome_picosdk_iii/doc/changestracker/leaveseqr-upload-failure-investigation.md#step-6--upstream-bug-report-draft--ready-to-file)
+[leaveseqr-upload-failure-investigation.md](https://github.com/jonwaterschoot/neotrellis-monome/blob/main/neotrellis_monome_picosdk_iii/doc/changestracker/leaveseqr-upload-failure-investigation.md#step-6--upstream-bug-report-draft--ready-to-file)
 
 The investigation includes:
 - Confirmed threshold: scripts ≥ 32,304 bytes crash the upstream v1.1.2 build
