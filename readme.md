@@ -11,6 +11,8 @@ The `combined/pr10-11-12` branch adds three pull requests by carlosedp to tehn's
 - [#11](https://codeberg.org/tehn/iii/pulls/11): scripts load and upload through flash in small pieces, so scripts over 32 KB work.
 - [#12](https://codeberg.org/tehn/iii/pulls/12): a 4 KB serial buffer that drains when full, so downloads of large scripts and boot messages get through.
 
+carlosedp keeps the same pull requests merged at [github.com/carlosedp/iii](https://github.com/carlosedp/iii).
+
 Other branches:
 
 - `main`: tehn's iii v1.1.2, unchanged.
