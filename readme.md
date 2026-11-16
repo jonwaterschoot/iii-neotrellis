@@ -36,7 +36,7 @@ To experiment with iii on a Pico devboard, see [blink](https://codeberg.org/tehn
 
 ## Discussion
 
-For questions about this fork, open an [issue here](https://github.com/jonwaterschoot/iii-neotrellis/issues). For iii itself, see [tehn's repo](https://codeberg.org/tehn/iii).
+For questions about this fork or the NeoTrellis firmware, open an [issue on neotrellis-monome](https://github.com/jonwaterschoot/neotrellis-monome/issues). For iii itself, see [tehn's repo](https://codeberg.org/tehn/iii).
 
 
 ## Credits
