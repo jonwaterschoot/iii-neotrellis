@@ -1,5 +1,7 @@
 # iii
 
+> **Fork of [iii](https://codeberg.org/tehn/iii) by tehn**, used by [neotrellis-monome](https://github.com/jonwaterschoot/neotrellis-monome). This is iii v1.1.2 with carlosedp's pull requests [#10](https://codeberg.org/tehn/iii/pulls/10), [#11](https://codeberg.org/tehn/iii/pulls/11) and [#12](https://codeberg.org/tehn/iii/pulls/12). For the original, issues and contributions, go to tehn's repo.
+
 A lua interface for rp2040-based devices, creating a USB-serial REPL, USB-MIDI interface, and mechanism for managing a small onboard file system. Lua scripts can be written and stored to flash, and the runtime can be interacted with in realtime.
 
 Designed primarily for [monome](https://monome.org) devices but is easily usable on any rp2040.
