@@ -46,7 +46,10 @@ static void print_stack_pos(lua_State *l, int pos, const char *prefix,
 #if PRINT_TYPES
     serial("%sstring: %s", prefix, str);
 #else
-    serial("%s", str);
+    // straight into the output stream, without a printf copy, so printing
+    // a large string (cat() of a file) needs no extra memory. strlen():
+    // stop at a '\0' like "%s" did (uploaded files end with one)
+    serial_tx_send((const uint8_t *)str, (uint32_t)strlen(str));
 #endif
   } else if (lua_isboolean(l, pos)) {
     const int b = lua_toboolean(l, pos);
@@ -328,21 +331,29 @@ static const struct luaL_Reg main_lib[] = {{"help", l_help},
 
                                            {NULL, NULL}};
 
+// collector pause, in percent of the heap left after the previous collection
+#define VM_GC_PAUSE 120
+
+// on failure just return NULL: lua then runs an emergency full collection
+// and retries, and only if that fails too raises a "not enough memory"
+// error, which reaches the script like any other error
 void *my_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
   (void)ud;
   (void)osize;
   if (nsize == 0) {
     free(ptr);
     return NULL;
-  } else {
-    void *x = realloc(ptr, nsize);
-    if (x == NULL) {
-      serial("-- out of memory!\r\n");
-      watchdog_reboot(0, 0, 1000);
-      // TODO: actually do something else?
-    }
-    return x;
   }
+  return realloc(ptr, nsize);
+}
+
+// errors outside any protected call (e.g. out of memory while starting up)
+// can't be recovered from; report and restart rather than hang
+static int vm_panic(lua_State *l) {
+  const char *msg = lua_tostring(l, -1);
+  serial("-- lua panic: %s\r\n", msg ? msg : "?");
+  watchdog_reboot(0, 0, 1000);
+  return 0;
 }
 
 void vm_init(bool run_script) {
@@ -352,6 +363,12 @@ void vm_init(bool run_script) {
     serial("vm_init fail!\r\n");
     return;
   }
+  lua_atpanic(L, vm_panic);
+
+  // lua's default pause (200%) waits until the heap has doubled since the
+  // last collection before starting another; with a large script loaded
+  // that is more than all of RAM. start the next cycle at 120% instead.
+  lua_gc(L, LUA_GCPARAM, LUA_GCPPAUSE, VM_GC_PAUSE);
 
   luaL_openlibs(L);
 
@@ -368,8 +385,9 @@ void vm_init(bool run_script) {
     serial("-- lib.lua not found\r\n");
     write_lib = true;
   } else {
-    char buf[24];
-    fs_file_read(&f, buf, 24);
+    char buf[24 + 1]; // +1: strstr() needs a terminated string
+    const int32_t n = fs_file_read(&f, buf, 24);
+    buf[n > 0 ? n : 0] = '\0';
     fs_file_close(&f);
     if(strstr(buf,III_VERSION)==NULL) {
       serial("-- lib.lua wrong version\r\n");
@@ -386,7 +404,8 @@ void vm_init(bool run_script) {
     strcpy(buf, (const char *)lib_lua_data);
     buf[sz] = 0;
     lfs_file_t file;
-    if (fs_file_open(&file, "lib.lua", LFS_O_CREAT | LFS_O_WRONLY) == 0) {
+    // TRUNC: if the new lib.lua is shorter, don't leave the old tail behind
+    if (fs_file_open(&file, "lib.lua", LFS_O_CREAT | LFS_O_WRONLY | LFS_O_TRUNC) == 0) {
       fs_file_write(&file, buf, sz);
       fs_file_close(&file);
     } else {
