@@ -13,6 +13,11 @@ The `combined/pr10-11-12` branch adds three pull requests by carlosedp to tehn's
 
 carlosedp keeps the same pull requests merged at [github.com/carlosedp/iii](https://github.com/carlosedp/iii).
 
+To do:
+
+- Add carlosedp's [#14](https://codeberg.org/tehn/iii/pulls/14): MIDI clock, start and stop currently send two stray zero bytes. Test with a DAW.
+- Add [#13](https://codeberg.org/tehn/iii/pulls/13), which fixes `pset_write` dropping zeros, once tehn merges it in a new iii version. Grids only rewrite `lib.lua` when the version changes.
+
 Other branches:
 
 - `main`: tehn's iii v1.1.2, unchanged.
